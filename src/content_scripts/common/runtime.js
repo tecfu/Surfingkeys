@@ -74,7 +74,7 @@ var runtime = (function() {
             pageUrlRegex: [],
             prevLinkRegex: /(\b(prev|previous)\b)|上页|上一页|前页|上頁|上一頁|前頁|<<|«/i,
             richHintsForKeystroke: 1000,
-            scrollStepSize: 70,
+            scrollStepSize: 200,
             showModeStatus: false,
             showProxyInStatusBar: false,
             smartPageBoundary: false,
