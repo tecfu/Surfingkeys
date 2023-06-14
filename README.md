@@ -7,7 +7,6 @@
 ```
 git clone https://github.com/tecfu/Surfingkeys
 chd Surfingkeys
-git checkout hack_hint_sizes
 npm install
 npm run build:prod
 ```
