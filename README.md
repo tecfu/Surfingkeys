@@ -15,7 +15,7 @@ npm run build:prod
 - For Chrome, this can be accessed through "chrome://extensions".
 - Disable the Surfingkeys extension that was installed from the Google Chrome Store.
 - Enable "Developer mode" then click "Load unpacked."
-- Navigate to <pathToSurfingkeys>/dist/<env>/<browser>.
+- Directory to load: `<pathToSurfingkeys>/dist/<env>/<browser>`, i.e. ~/Surfingkeys/dist/production/chrome/.
 
 ## SurfingKeys Configuration
 
