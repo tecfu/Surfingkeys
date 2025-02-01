@@ -4,18 +4,22 @@ import Mode from './mode';
 import KeyboardUtils from './keyboardUtils';
 import {
     getRealEdit,
-    scrollIntoViewIfNeeded,
-    setSanitizedContent,
-    showBanner,
-    showPopup,
     isEditable,
     isElementClickable,
     isElementPartiallyInViewport,
     isInUIFrame,
+    mapInMode,
+    scrollIntoViewIfNeeded,
+    setSanitizedContent,
+    showBanner,
+    showPopup,
 } from './utils.js';
 
 function createDisabled(normal) {
-    var self = new Mode("Disabled");
+    const self = new Mode("Disabled");
+
+    // hide status line for Disabled mode
+    self.statusLine = "";
 
     // Disabled has higher priority than others.
     self.priority = 99;
@@ -30,6 +34,50 @@ function createDisabled(normal) {
         }
     });
 
+    return self;
+}
+
+function createLurk(normal) {
+    const self = new Mode("Lurk");
+
+    function enterNormal() {
+        normal.enter();
+        if (window === top) {
+            RUNTIME('setSurfingkeysIcon', {
+                status: "enabled"
+            });
+        }
+    }
+
+    self.mappings = new Trie();
+    self.map_node = self.mappings;
+    self.mappings.add(KeyboardUtils.encodeKeystroke("<Alt-i>"), {
+        annotation: "Enter normal mode",
+        feature_group: 16,
+        code: enterNormal
+    });
+    self.mappings.add("p", {
+        annotation: "Enter ephemeral normal mode to temporarily enable SurfingKeys",
+        feature_group: 16,
+        code: function() {
+            enterNormal();
+            setTimeout(() => {
+                normal.revertToLurk();
+            }, 1000);
+        }
+    });
+
+    // Lurk and Disabled should be mutually exclusive.
+    self.addEventListener('keydown', function(event) {
+        var realTarget = getRealEdit(event);
+        if (!isEditable(realTarget) && event.sk_keyName.length) {
+            Mode.handleMapKey.call(self, event);
+            if (event.sk_stopPropagation) {
+                // keyup event also needs to be suppressed for the key whose keydown has been suppressed.
+                Mode.suppressKeyUp(event.keyCode);
+            }
+        }
+    });
     return self;
 }
 
@@ -89,6 +137,40 @@ function createNormal(insert) {
         _passFocus = pf;
     };
 
+    let _lurk = undefined;
+    self.startLurk = () => {
+        let state = "lurking";
+        if (!_lurk) {
+            self.exit();
+            _lurk = createLurk(self);
+            _lurkMaps.forEach((keymap) => {
+                mapInMode(_lurk, keymap[0], keymap[1]);
+                _lurk.mappings.remove(KeyboardUtils.encodeKeystroke(keymap[1]));
+            });
+            _lurkMaps = undefined;
+            _lurk.enter(0, true);
+        } else if (Mode.getCurrent() !== _lurk) {
+            state = "enabled";
+        }
+        return state;
+    };
+    self.revertToLurk = () => {
+        // peeking exit to keep modes such hints above normal.
+        self.exit(true);
+        if (window === top) {
+            RUNTIME('setSurfingkeysIcon', {
+                status: "lurking"
+            });
+        }
+    };
+    self.getLurkMode = () => {
+        return _lurk;
+    };
+    let _lurkMaps = [];
+    self.addLurkMap = (new_keystroke, old_keystroke) => {
+        _lurkMaps.push([new_keystroke, old_keystroke]);
+    };
+
     var _once = false;
     self.addEventListener('keydown', function(event) {
         var realTarget = getRealEdit(event);
@@ -136,7 +218,12 @@ function createNormal(insert) {
             Mode.finish(self);
             event.sk_stopPropagation = true;
         } else if (event.sk_keyName.length) {
-            var done = Mode.handleMapKey.call(self, event);
+            var done = Mode.handleMapKey.call(self, event, () => {
+                // revert to lurk only when Esc is not handled and lurk mode available.
+                if (Mode.isSpecialKeyOf("<Esc>", event.sk_keyName) && _lurk) {
+                    self.revertToLurk();
+                }
+            });
             if (_once && done) {
                 _once = false;
                 self.exit();
@@ -194,11 +281,11 @@ function createNormal(insert) {
     });
 
     self.toggleBlocklist = function() {
-        if (document.location.href.indexOf(chrome.extension.getURL("/")) !== 0) {
+        if (document.location.href.indexOf(chrome.runtime.getURL("/")) !== 0) {
             RUNTIME('toggleBlocklist', {
-                blocklistPattern: (runtime.conf.blocklistPattern ? runtime.conf.blocklistPattern.toJSON() : "")
+                blocklistPattern: (runtime.conf.blocklistPattern ? runtime.conf.blocklistPattern : "")
             }, function(resp) {
-                if (resp.disabled) {
+                if (resp.state === "disabled") {
                     if (resp.blocklist.hasOwnProperty(".*")) {
                         showBanner('Surfingkeys is globally disabled, please enable it globally from popup menu.', 3000);
                     } else {
@@ -262,10 +349,10 @@ function createNormal(insert) {
             if (runtime.conf.smartPageBoundary && ((this === document.scrollingElement)
                 || scrollNodes.length === 1 && this === scrollNodes[0])) {
                 if (this.scrollTop === 0 && y < 0) {
-                    return dispatchSKEvent('topBoundaryHit');
+                    return dispatchSKEvent("hints", ['topBoundaryHit']);
                 }
                 if (this.scrollHeight - this.scrollTop <= this.clientHeight + 1 && y > 0) {
-                    return dispatchSKEvent('bottomBoundaryHit');
+                    return dispatchSKEvent("hints", ['bottomBoundaryHit']);
                 }
             }
             if (RUNTIME.repeats > 1) {
@@ -277,13 +364,13 @@ function createNormal(insert) {
                 var d = Math.max(100, 20 * Math.log(Math.abs( x || y)));
                 elm.smoothScrollBy(x, y, d);
             } else {
-                dispatchSKEvent('scrollStarted');
+                dispatchSKEvent("hints", ['scrollStarted']);
                 elm.scrollBy({
                     'behavior': 'instant',
                     'left': x,
                     'top': y,
                 });
-                dispatchSKEvent('scrollDone');
+                dispatchSKEvent("hints", ['scrollDone']);
             }
         };
         elm.safeScroll_ = (prop, value, increasing) => {
@@ -311,7 +398,7 @@ function createNormal(insert) {
                     if (previousTimestamp === 0) {
                         // init previousTimestamp in first step
                         previousTimestamp = t;
-                        dispatchSKEvent('scrollStarted');
+                        dispatchSKEvent("hints", ['scrollStarted']);
                         return window.requestAnimationFrame(step);
                     }
                     var old = elm[prop], delta = (t - previousTimestamp) * distance / duration;
@@ -335,7 +422,7 @@ function createNormal(insert) {
                         || stepCompleted )// distance completed
                     ) {
                         elm.style.scrollBehavior = '';
-                        dispatchSKEvent('scrollDone');
+                        dispatchSKEvent("hints", ['scrollDone']);
                     } else {
                         window.requestAnimationFrame(step);
                     }
@@ -386,7 +473,7 @@ function createNormal(insert) {
         } else {
             rc = elm.getBoundingClientRect();
         }
-        dispatchSKEvent('highlightElement', {
+        dispatchSKEvent("front", ['highlightElement', {
             duration: 200,
             rect: {
                 top: rc.top,
@@ -394,7 +481,7 @@ function createNormal(insert) {
                 width: rc.width,
                 height: rc.height
             }
-        });
+        }]);
     }
     function changeScrollTarget(silent) {
         scrollNodes = Mode.getScrollableElements();
@@ -491,7 +578,7 @@ function createNormal(insert) {
             default:
                 break;
         }
-        dispatchSKEvent('turnOffDOMObserver');
+        dispatchSKEvent("observer", ['turnOff']);
     };
 
     self.refreshScrollableElements = function () {
@@ -616,7 +703,7 @@ function createNormal(insert) {
             // hide borders
             var borderStyle = elm.style.borderStyle;
             elm.style.borderStyle = "none";
-            dispatchSKEvent('toggleStatus', [false]);
+            dispatchSKEvent("front", ['toggleStatus', false]);
 
             var dx = 0, dy = 0, sx, sy, sw, sh, ww, wh, dh = elm.scrollHeight, dw = elm.scrollWidth;
             if (elm === document.scrollingElement) {
@@ -654,7 +741,7 @@ function createNormal(insert) {
                 if (lastScrollTop === elm.scrollTop) {
                     if (lastScrollLeft === elm.scrollLeft) {
                         // done
-                        dispatchSKEvent('toggleStatus', [true]);
+                        dispatchSKEvent("front", ['toggleStatus', true]);
                         showPopup("<img src='{0}' />".format(canvas.toDataURL( "image/png" )));
                         // restore overflow
                         elm.style.overflowY = overflowY;
@@ -677,7 +764,7 @@ function createNormal(insert) {
                             RUNTIME('captureVisibleTab', null, function(response) {
                                 img.src = response.dataUrl;
                             });
-                        }, 100);
+                        }, 1000);
                     }
                 } else {
                     lastScrollTop = elm.scrollTop;
@@ -692,7 +779,7 @@ function createNormal(insert) {
                         RUNTIME('captureVisibleTab', null, function(response) {
                             img.src = response.dataUrl;
                         });
-                    }, 500);
+                    }, 1000);
                 }
             };
 
@@ -842,7 +929,7 @@ function createNormal(insert) {
         feature_group: 9,
         repeatIgnore: true,
         code: function() {
-            dispatchSKEvent('openFinder');
+            dispatchSKEvent("front", ['openFinder']);
         }
     });
 
@@ -870,7 +957,7 @@ function createNormal(insert) {
             // perform inline query after 1 ms
             // to avoid calling on selection collapse
             setTimeout(() => {
-                dispatchSKEvent('querySelectedWord');
+                dispatchSKEvent("front", ['querySelectedWord']);
             }, 1);
         }
     }
@@ -881,7 +968,7 @@ function createNormal(insert) {
             _disabled = createDisabled(self);
             _disabled.enter(0, true);
         }
-        dispatchSKEvent('turnOffDOMObserver');
+        dispatchSKEvent("observer", ['turnOff']);
         document.removeEventListener("mouseup", _onMouseUp);
     };
 
@@ -895,7 +982,7 @@ function createNormal(insert) {
     self.enable();
 
     self.onExit = function() {
-        dispatchSKEvent('turnOffDOMObserver');
+        dispatchSKEvent("observer", ['turnOff']);
         _nodesHasSKScroll.forEach(function(n) {
             delete n.skScrollBy;
             delete n.smoothScrollBy;

@@ -16,19 +16,55 @@ function modifyManifest(browser, mode, buffer) {
         manifest.options_ui = {
             page: "pages/options.html"
         };
-        manifest.permissions.push("cookies",
-            "contextualIdentities");
+        manifest.permissions.push("cookies");
+        manifest.permissions.push("contextualIdentities");
+        manifest.permissions.push("<all_urls>");
     } else if (browser === "safari") {
         manifest.incognito = "split";
         manifest.options_page = "pages/options.html";
+        manifest.permissions.push("<all_urls>");
         manifest.background.persistent = false;
     } else {
+        // chromium family
+        manifest.manifest_version = 3;
         manifest.permissions.push("proxy");
         manifest.permissions.push("tts");
         manifest.permissions.push("downloads.shelf");
-        manifest.background.persistent = false;
+        manifest.permissions.push("favicon");
+        manifest.permissions.push("userScripts");
         manifest.incognito = "split";
         manifest.options_page = "pages/options.html";
+        manifest.background = {
+            "service_worker": "background.js"
+        };
+        manifest.host_permissions = [
+            "<all_urls>"
+        ];
+        manifest.web_accessible_resources = [
+            {
+                "extension_ids": ["*"],
+                "resources": [
+                    "_favicon/*",
+                    "api.js",
+                    "pages/neovim.html",
+                    "pages/default.js",
+                    "pages/emoji.tsv",
+                    "pages/l10n.json",
+                    "pages/frontend.html",
+                    "pages/pdf_viewer.html",
+                    "pages/pdf_viewer.css",
+                    "pages/pdf_viewer.mjs",
+                    "pages/shadow.css",
+                    "pages/default.css"
+                ],
+                "matches": [
+                    "<all_urls>"
+                ]
+            }
+        ];
+        manifest.action = manifest.browser_action;
+        delete manifest.browser_action;
+        delete manifest.content_security_policy;
 
         if (mode === "development") {
             manifest.key = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAneIRqYRqG/0RoYzpWoyeeO8KxxvWZvIabABbeQyHQ2PFOf81j/O5J28HGAEQJ56AptKMTcTeG2qZga9B2u9k98OmRcGp8BDco6fh1vD6/x0fWfehPeub5IcEcQmCd1lBuVa8AtUqV3C+He5rS4g8dB8g8GRlSPPSiDSVNMv+iwKAk7TbM3TKz6DyFO8eCtWXr6wJCcYeJA+Mub7o8DKIHKgv8XH8+GbJGjeeIUBU7mlGlyS7ivdsG1V6D2/Ldx0O1e6sRn7f9jiC4Xy1N+zgZ7BshYbnlbwedomg1d5kuo5m4rS+8BgTchPPkhkvEs62MI4e+fmQd0oGgs7PtMSrTwIDAQAb";
@@ -64,8 +100,8 @@ module.exports = (env, argv) => {
     if (browser === "chrome") {
         pagesCopyOptions.ignore = [];
         entry['pages/neovim'] = './src/pages/neovim.js';
-        entry['pages/pdf_viewer'] = './src/content_scripts/pdf_viewer.js';
         moduleEntries['pages/neovim_lib'] = './src/nvim/renderer.ts';
+        moduleEntries['api'] = './src/user_scripts/index.js';
     }
     if (browser !== "safari") {
         entry['pages/markdown'] = './src/content_scripts/markdown.js';
@@ -126,6 +162,9 @@ module.exports = (env, argv) => {
                     { from: 'src/content_scripts/ui/frontend.html', to: 'pages' },
                     { from: 'src/content_scripts/ui/frontend.css', to: 'pages' },
                     { from: 'node_modules/ace-builds/src-noconflict/worker-javascript.js', to: 'pages' },
+                    { from: 'node_modules/pdfjs-dist/cmaps', to: 'pages/cmaps' },
+                    { from: 'node_modules/pdfjs-dist/build/pdf.min.mjs', to: 'pages' },
+                    { from: 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs', to: 'pages' },
                     { from: 'src/icons', to: 'icons' },
                     { from: 'src/content_scripts/content.css', to: 'content.css' },
                     {

@@ -1,7 +1,7 @@
 import {
     LOG,
     filterByTitleOrUrl,
-} from '../content_scripts/common/utils.js';
+} from '../common/utils.js';
 import {
     _save,
     dictFromArray,
@@ -26,6 +26,8 @@ function loadRawSettings(keys, cb, defaultSet) {
                     cb(subset);
                 });
             } else if (localSavedAt < syncSavedAt) {
+                // don't sync local path
+                delete syncSet.localPath;
                 extendObject(rawSet, syncSet);
                 cb(getSubSettings(rawSet, keys));
                 _save(chrome.storage.local, syncSet);
@@ -117,7 +119,7 @@ function getLatestHistoryItem(text, maxResults, cb) {
             text: "",
             maxResults: prefetch
         }, function(items) {
-            const filtered = filterByTitleOrUrl(items, text);
+            const filtered = filterByTitleOrUrl(items, text, false);
             results = [...results, ...filtered];
             if (items.length < maxResults || results.length >= maxResults) {
                 // all items are scanned or we have got what we want
@@ -134,7 +136,7 @@ function getLatestHistoryItem(text, maxResults, cb) {
 
 function generatePassword() {
     const random = new Uint32Array(8);
-    window.crypto.getRandomValues(random);
+    self.crypto.getRandomValues(random);
     return Array.from(random).join("");
 }
 
@@ -151,7 +153,8 @@ function startNative() {
             if (nativeConnected) {
                 nvimServer.instance = startNative();
             } else {
-                LOG("error", "Failed to connect neovim, please make sure your neovim version 0.5 or above.");
+                delete nvimServer.instance;
+                LOG("warn", "Failed to connect neovim, please make sure your neovim version 0.5 or above.");
             }
         });
         nm.onMessage.addListener(async (resp) => {

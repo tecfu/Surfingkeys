@@ -169,7 +169,7 @@ Surfingkeys有三种模式：normal，visual和insert。
 
     settings.startToShowEmoji = 0;
 
-[表情符号完整列表](https://github.com/brookhong/Surfingkeys/blob/master/pages/emoji.tsv)
+[表情符号完整列表](https://github.com/brookhong/Surfingkeys/blob/master/src/pages/emoji.tsv)
 
 ### 查找
 
@@ -186,6 +186,23 @@ Surfingkeys有三种模式：normal，visual和insert。
     api.mapkey('p', '#0enter ephemeral PassThrough mode to temporarily suppress SurfingKeys', function() {
         api.Normal.passThrough(1500);
     });
+### Lurk mode
+
+用户可以指定在哪些页面Surfingkeys默认进入Lurk模式，直到通过`Alt-i`或者`p`（短暂的）唤醒，
+
+    settings.lurkingPattern = /https:\/\/github\.com|.*confluence.*/i;
+
+如果当前页面匹配`lurkingPattern`，Surfingkeys自动潜伏，此时用户必须通过`Alt-i`或者`p`唤醒才能进入正常模式，如果用户在正常模式下按`Esc`或者超时，Surfingkeys会退回潜伏模式。
+
+可使用`lmap`修改默认按键，如，
+
+    api.lmap("<Alt-j>", "<Alt-i>");
+
+任务栏里的Surfingkeys图标会反应当前状态：
+
+* 灰色 -- 禁用
+* 半灰半彩 -- 潜伏
+* 彩色 -- 启用
 
 ## 搜索栏
 
@@ -252,9 +269,11 @@ search_leader_key(`s`)加上大写的别名(`G`)会打开搜索框让你可以�
 
 默认情况下，按`T`会显示所有已打开标签页，然后按相应的提示键可以切到该标签页。
 
-![tabs_overlay](https://cloud.githubusercontent.com/assets/288207/10544636/245447f6-7457-11e5-8372-62b8f6337158.png)
+![tabs_overlay](https://github.com/brookhong/Surfingkeys/assets/288207/f0ca339d-133f-4fb0-b902-cdc64fc71374)
 
-这里有个设置`settings.tabsThreshold`，当然打开的标签页总数超过它时，再按空格就会使用搜索栏来选择标签。
+如果你按的键没有匹配到任何标签，搜索栏会自动打开。因此你可以直接按一个标签提示符中不存在的键比如`;`或者`j`直接打开搜索栏来搜索标签。
+
+这里也有个设置`settings.tabsThreshold`，当然打开的标签页总数超过它时，再按空格就会使用搜索栏来选择标签。
 
 ![tabs_omnibar](https://cloud.githubusercontent.com/assets/288207/10544630/1fbdd02c-7457-11e5-823c-14411311c315.png)
 
@@ -512,7 +531,8 @@ Surfingkeys默认使用[这个markdown分析器](https://github.com/chjj/marked)
 | settings.omnibarPosition | "middle" | 定义搜索框位置。 ["middle", "bottom"] |
 | settings.omnibarSuggestionTimeout | 200 | 设置触发搜索引擎提示的超时，当按键过去设定毫秒后才发起搜索引擎提示的请求，这样避免每次按键就触发请求。|
 | settings.focusFirstCandidate | false | 是否在搜索栏下面自动选择第一个匹配的结果。 |
-| settings.tabsThreshold | 9 | 当打开标签页的数量超过设定值时，使用搜索栏来查找标签页。 |
+| settings.tabsThreshold | 100 | 当打开标签页的数量超过设定值时，使用搜索栏来查找标签页。 |
+| settings.verticalTabs | true | 是否纵向排列标签选择栏。 |
 | settings.clickableSelector | "" | 自定义CSS selector用于f键选择无法检测到的可点击元素，例如"\*.jfk-button, \*.goog-flat-menu-button"。 |
 | settings.clickablePat | /(https?&#124;thunder&#124;magnet):\/\/\S+/ig | 用于检测文字中可点击链接的正则表达式，你可以按`O`打开检测到的链接。|
 | settings.editableSelector | div.CodeMirror-scroll,div.ace_content | 额外CSS selector以自定义可编辑元素。|

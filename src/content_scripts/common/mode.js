@@ -6,6 +6,8 @@ import {
 import { RUNTIME, dispatchSKEvent, runtime } from './runtime.js';
 import KeyboardUtils from './keyboardUtils';
 
+var mode_stack = [];
+
 const Mode = function(name, statusLine) {
     this.name = name;
     this.statusLine = statusLine;
@@ -81,7 +83,9 @@ const Mode = function(name, statusLine) {
     };
 };
 
-var mode_stack = [];
+Mode.getCurrent = () => {
+    return mode_stack[0];
+};
 
 Mode.specialKeys = {
     "<Alt-s>": ["<Alt-s>"],       // hotkey to toggleBlocklist
@@ -227,19 +231,16 @@ Mode.init = (cb)=> {
 
 
 Mode.showStatus = function() {
-    if (runtime.conf.showModeStatus && document.hasFocus() && mode_stack.length) {
+    if (document.hasFocus() && mode_stack.length) {
         var cm = mode_stack[0];
-        var sl = cm.statusLine;
-        if (sl === undefined) {
-            sl = cm.name;
-        }
+        var sl = cm.statusLine || (runtime.conf.showModeStatus ? cm.name : "");
         if (sl !== "" && window !== top && !isInUIFrame()) {
             var pathname = window.location.pathname.split('/');
             if (pathname.length) {
                 sl += " - frame: " + pathname[pathname.length - 1];
             }
         }
-        dispatchSKEvent('showStatus', [0, sl]);
+        dispatchSKEvent("front", ['showStatus', [sl]]);
     }
 };
 
@@ -248,7 +249,7 @@ Mode.finish = function (mode) {
     if (mode.map_node !== mode.mappings || mode.pendingMap != null || mode.repeats) {
         mode.map_node = mode.mappings;
         mode.pendingMap = null;
-        mode.isTrustedEvent && dispatchSKEvent('hideKeystroke');
+        mode.isTrustedEvent && dispatchSKEvent("front", ['hideKeystroke']);
         if (mode.repeats) {
             mode.repeats = "";
         }
@@ -287,7 +288,7 @@ Mode.handleMapKey = function(event, onNoMatched) {
     ) {
         // reset only after target action executed or cancelled
         this.repeats += key;
-        this.isTrustedEvent && dispatchSKEvent('showKeystroke', [key, this]);
+        this.isTrustedEvent && dispatchSKEvent("front", ['showKeystroke', key, this]);
         event.sk_stopPropagation = true;
     } else {
         var last = this.map_node;
@@ -302,7 +303,7 @@ Mode.handleMapKey = function(event, onNoMatched) {
                 if (code.length) {
                     // bound function needs arguments
                     this.pendingMap = code;
-                    this.isTrustedEvent && dispatchSKEvent('showKeystroke', [key, this]);
+                    this.isTrustedEvent && dispatchSKEvent("front", ['showKeystroke', key, this]);
                     event.sk_stopPropagation = true;
                 } else {
                     this.setLastKeys && this.setLastKeys(this.map_node.meta.word);
@@ -316,7 +317,7 @@ Mode.handleMapKey = function(event, onNoMatched) {
                     actionDone = Mode.finish(thisMode);
                 }
             } else {
-                this.isTrustedEvent && dispatchSKEvent('showKeystroke', [key, this]);
+                this.isTrustedEvent && dispatchSKEvent("front", ['showKeystroke', key, this]);
                 event.sk_stopPropagation = true;
             }
         }

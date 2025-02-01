@@ -1,5 +1,8 @@
-function dispatchSKEvent(type, args) {
-    document.dispatchEvent(new CustomEvent(`surfingkeys:${type}`, { 'detail': args }));
+function dispatchSKEvent(type, args, target) {
+    if (target === undefined) {
+        target = document;
+    }
+    target.dispatchEvent(new CustomEvent(`surfingkeys:${type}`, { 'detail': args }));
 }
 
 /**
@@ -31,7 +34,7 @@ function RUNTIME(action, args, callback) {
             runtime.on('onTtsEvent', callback);
         }
     } catch (e) {
-        dispatchSKEvent('showPopup', ['[runtime exception] ' + e]);
+        dispatchSKEvent("front", ['showPopup', '[runtime exception] ' + e]);
     }
 }
 
@@ -42,6 +45,7 @@ var runtime = (function() {
             lastKeys: "",
             // local part from settings
             blocklistPattern: undefined,
+            lurkingPattern: undefined,
             smartCase: true,
             caseSensitive: false,
             clickablePat: /(https?:\/\/|thunder:\/\/|magnet:)\S+/ig,
@@ -81,7 +85,8 @@ var runtime = (function() {
             smoothScroll: true,
             startToShowEmoji: 2,
             stealFocusOnLoad: true,
-            tabsThreshold: 9,
+            tabsThreshold: 100,
+            verticalTabs: true,
             textAnchorPat: /(^[\n\r\s]*\S{3,}|\b\S{4,})/g,
             ignoredFrameHosts: ["https://tpc.googlesyndication.com"],
             scrollFriction: 0,
@@ -93,7 +98,7 @@ var runtime = (function() {
         },
     }, _handlers = {};
 
-    var getTopURLPromise = new Promise(function(resolve, reject) {
+    const getTopURLPromise = new Promise(function(resolve, reject) {
         if (window === top) {
             resolve(window.location.href);
         } else {
@@ -156,7 +161,7 @@ var runtime = (function() {
             if (topUrl === "null" || new URL(topUrl).origin === "file://") {
                 topUrl = "*";
             }
-            top.postMessage({surfingkeys_data: msg}, topUrl);
+            top.postMessage({surfingkeys_uihost_data: msg}, topUrl);
         });
     };
 

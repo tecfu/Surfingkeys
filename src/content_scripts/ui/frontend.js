@@ -1,5 +1,6 @@
 import { encode } from 'js-base64';
 import {
+    attachFaviconToImgSrc,
     createElementWithContent,
     generateQuickGuid,
     getAnnotations,
@@ -7,10 +8,11 @@ import {
     getWordUnderCursor,
     htmlEncode,
     initL10n,
+    initSKFunctionListener,
+    refreshHints,
     setSanitizedContent,
     mapInMode
 } from '../common/utils.js';
-import Trie from '../common/trie';
 import { RUNTIME, runtime } from '../common/runtime.js';
 import KeyboardUtils from '../common/keyboardUtils';
 import Mode from '../common/mode';
@@ -20,6 +22,7 @@ import createNormal from '../common/normal.js';
 import createVisual from '../common/visual.js';
 import createHints from '../common/hints.js';
 import createAPI from '../common/api.js';
+import createDefaultMappings from '../common/default.js';
 import createOmnibar from './omnibar.js';
 import createCommands from './command.js';
 
@@ -34,6 +37,7 @@ const Front = (function() {
 
     const self = new Mode("Front");
     self._actions = {};
+    self.topSize = [0, 0];
     const omnibar = createOmnibar(self, clipboard);
 
     createCommands(normal, omnibar.command, omnibar);
@@ -46,41 +50,57 @@ const Front = (function() {
     };
 
     const api = createAPI(clipboard, insert, normal, hints, visual, self, {});
+    createDefaultMappings(api, clipboard, insert, normal, hints, visual, self);
 
     var _actions = self._actions,
         _callbacks = {};
     self.contentCommand = function(args, successById) {
-        args.commandToContent = true;
+        args.toContent = true;
         args.id = generateQuickGuid();
         if (successById) {
             args.ack = true;
             _callbacks[args.id] = successById;
         }
-        top.postMessage({surfingkeys_data: args}, self.topOrigin);
+        top.postMessage({surfingkeys_uihost_data: args}, self.topOrigin);
     };
 
     self.postMessage = function(args) {
-        top.postMessage({surfingkeys_data: args}, self.topOrigin);
+        top.postMessage({surfingkeys_uihost_data: args}, self.topOrigin);
     };
 
+    var pressedHintKeys = "";
     self.addEventListener('keydown', function(event) {
         if (Mode.isSpecialKeyOf("<Esc>", event.sk_keyName)) {
             self.hidePopup();
             event.sk_stopPropagation = true;
-        } else {
-            if (_tabs.trie) {
-                _tabs.trie = _tabs.trie.find(event.sk_keyName);
-                if (!_tabs.trie) {
-                    self.hidePopup();
-                    _tabs.trie = null;
-                } else if (_tabs.trie.meta) {
-                    RUNTIME('focusTab', {
-                        windowId: _tabs.trie.meta.windowId,
-                        tabId: _tabs.trie.meta.id
-                    });
-                    self.hidePopup();
-                    _tabs.trie = null;
+        } else if (_tabs.style.display !== "none") {
+            const tabHints = _tabs.querySelectorAll('div.sk_tab>div.sk_tab_hint');
+            if (tabHints.length > 0) {
+                const key = event.sk_keyName;
+                const characters = hints.getCharacters().toLowerCase();
+                if (event.keyCode === KeyboardUtils.keyCodes.backspace) {
+                    if (pressedHintKeys.length > 0) {
+                        pressedHintKeys = pressedHintKeys.substr(0, pressedHintKeys.length - 1);
+                        refreshHints(tabHints, pressedHintKeys);
+                    }
+                } else if (characters.indexOf(key.toLowerCase()) !== -1) {
+                    pressedHintKeys = pressedHintKeys + key.toUpperCase();
+                    const hintState = refreshHints(tabHints, pressedHintKeys);
+                    if (hintState.matched) {
+                        RUNTIME('focusTab', {
+                            windowId: hintState.matched.windowId,
+                            tabId: hintState.matched.id
+                        });
+                        pressedHintKeys = "";
+                        self.hidePopup();
+                    } else if (hintState.candidates === 0) {
+                        pressedHintKeys = "";
+                        self.hidePopup();
+                    }
+                } else {
+                    showElement(_omnibar, {type: 'Tabs'});
                 }
+
                 event.sk_stopPropagation = true;
             }
         }
@@ -91,7 +111,7 @@ const Front = (function() {
         this.enter = function() {
             onEnter && onEnter();
             _state = this;
-            top.postMessage({surfingkeys_data: {
+            top.postMessage({surfingkeys_uihost_data: {
                 action: 'setFrontFrame',
                 pointerEvents: pointerEvents,
                 frameHeight: frameHeight
@@ -203,7 +223,6 @@ const Front = (function() {
                 } else {
                     clearInterval(inputGuard);
                 }
-                console.log(inputGuard);
             }, 100);
         }
     };
@@ -236,30 +255,59 @@ const Front = (function() {
 
     _tabs.onShow = function(tabs) {
         setSanitizedContent(_tabs, "");
-        _tabs.trie = new Trie();
-        var hintLabels = hints.genLabels(tabs.length);
+        var hintLabels = hints.genLabels(tabs.length - 1);
+        var j = 0;
+        const unitWidth = window.innerWidth / tabs.length - 2;
+        const verticalTabs = runtime.conf.verticalTabs;
+        _tabs.className = verticalTabs ? "vertical" : "horizontal";
         tabs.forEach(function(t, i) {
             var tab = document.createElement('div');
             tab.setAttribute('class', 'sk_tab');
-            tab.style.width = '200px';
-            _tabs.trie.add(hintLabels[i].toLowerCase(), t);
-            setSanitizedContent(tab, `<div class=sk_tab_hint>${hintLabels[i]}</div><div class=sk_tab_wrap><div class=sk_tab_icon><img src='chrome://favicon/${t.url}'></div><div class=sk_tab_title>${htmlEncode(t.title)}</div></div>`);
-            tab.url = t.url;
+            if (!verticalTabs) {
+                tab.style.width = unitWidth + 'px';
+            }
+            if (t.active === false) {
+                setSanitizedContent(tab, `<div class=sk_tab_hint>${hintLabels[j]}</div><div class=sk_tab_wrap><div class=sk_tab_icon><img/></div><div class=sk_tab_title>${htmlEncode(t.title)}</div></div>`);
+                const tabHint = tab.querySelector("div.sk_tab_hint");
+                tabHint.label = hintLabels[j];
+                tabHint.link = {id: t.id, windowId: t.windowId};
+                j ++;
+            } else {
+                setSanitizedContent(tab, `<div class=sk_tab_wrap><div class=sk_tab_icon><img/></div><div class=sk_tab_title>${htmlEncode(t.title)}</div></div>`);
+                tab.style.boxShadow = "0px 3px 7px 0px rgba(245, 245, 0, 0.9)";
+            }
+            attachFaviconToImgSrc(t, tab.querySelector("img"));
+            if (verticalTabs) {
+                tab.append(createElementWithContent('div', '🚀', {class: "tab_rocket"}));
+            } else {
+                tab.querySelector("div.sk_tab_title").style.width = (unitWidth - 24) + 'px';
+            }
             _tabs.append(tab);
         });
-        _tabs.querySelectorAll('div.sk_tab').forEach(function(tab) {
-            tab.append(createElementWithContent('div', tab.url, {class: "sk_tab_url"}));
-        });
+        if (_tabs.getBoundingClientRect().height > self.topSize[1]) {
+            _tabs.className = "inline";
+        }
     };
     _actions['chooseTab'] = function() {
-        RUNTIME('getTabs', null, function(response) {
-            if (response.tabs.length > runtime.conf.tabsThreshold) {
+        const tabsThreshold = Math.min(runtime.conf.tabsThreshold, Math.ceil(window.innerWidth / 26));
+        RUNTIME('getTabs', {queryInfo: {currentWindow: true}, tabsThreshold}, function(response) {
+            if (response.tabs.length > tabsThreshold) {
                 showElement(_omnibar, {type: 'Tabs'});
             } else if (response.tabs.length > 0) {
                 showElement(_tabs, response.tabs);
             }
         });
     };
+    self.chooseTab = _actions['chooseTab'];
+
+    function localizeAnnotation(locale, annotation) {
+        if (annotation.constructor.name === "Array") {
+            const fmt = annotation[0];
+            return locale(fmt).format(...annotation.slice(1));
+        } else {
+            return locale(annotation);
+        }
+    }
 
     function buildUsage(metas, cb) {
         var feature_groups = [
@@ -279,16 +327,22 @@ const Front = (function() {
             'Proxy',                 // 13
             'Misc',                  // 14
             'Insert Mode',           // 15
+            'Lurk Mode',             // 16
         ];
 
         initL10n(function(locale) {
             var help_groups = feature_groups.map(function(){return [];});
-            help_groups[0].push("<div><span class=kbd-span><kbd>&lt;Alt-s&gt;</kbd></span><span class=annotation>{0}</span></div>".format(locale("Toggle SurfingKeys on current site")));
+            const lh = Mode.specialKeys["<Alt-s>"].length;
+            if (lh > 0) {
+                help_groups[0].push("<div><span class=kbd-span><kbd>{0}</kbd></span><span class=annotation>{1}</span></div>".format(
+                    htmlEncode(Mode.specialKeys["<Alt-s>"][lh - 1]), locale("Toggle SurfingKeys on current site")));
+            }
 
             metas = metas.concat(getAnnotations(omnibar.mappings));
             metas.forEach(function(meta) {
-                var w = KeyboardUtils.decodeKeystroke(meta.word);
-                var item = `<div><span class=kbd-span><kbd>${htmlEncode(w)}</kbd></span><span class=annotation>${locale(meta.annotation)}</span></div>`;
+                const w = KeyboardUtils.decodeKeystroke(meta.word);
+                const annotation = localizeAnnotation(locale, meta.annotation);
+                const item = `<div><span class=kbd-span><kbd>${htmlEncode(w)}</kbd></span><span class=annotation>${annotation}</span></div>`;
                 help_groups[meta.feature_group].push(item);
             });
             help_groups = help_groups.map(function(g, i) {
@@ -340,9 +394,9 @@ const Front = (function() {
         // send response in callback from buildUsage
         delete message.ack;
         buildUsage(message.metas, function(usage) {
-            top.postMessage({surfingkeys_data: {
+            top.postMessage({surfingkeys_uihost_data: {
                 data: usage,
-                responseToContent: message.commandToFrontend,
+                toContent: true,
                 id: message.id
             }}, self.topOrigin);
         });
@@ -358,10 +412,6 @@ const Front = (function() {
     _actions['showPopup'] = function(message) {
         showPopup(message.content);
     };
-
-    document.addEventListener("surfingkeys:showPopup", function(evt) {
-        showPopup(...evt.detail);
-    });
 
     self.vimMappings = [];
     let _aceEditor = null;
@@ -439,9 +489,6 @@ const Front = (function() {
     _actions['openFinder'] = function() {
         Find.open();
     };
-    document.addEventListener("surfingkeys:openFinder", function(evt) {
-        Find.open();
-    });
 
     function showBanner(content, linger_time) {
         _banner.style.cssText = "";
@@ -460,9 +507,6 @@ const Front = (function() {
     _actions['showBanner'] = function(message) {
         showBanner(message.content, message.linger_time);
     };
-    document.addEventListener("surfingkeys:showBanner", function(evt) {
-        showBanner(...evt.detail);
-    });
     _actions['showBubble'] = function(message) {
         var pos = message.position;
         pos.left += pos.winX;
@@ -523,11 +567,18 @@ const Front = (function() {
     };
 
     _actions['showStatus'] = function(message) {
-        StatusBar.show(message.position, message.content, message.duration);
+        StatusBar.show(message.contents, message.duration);
     };
 
-    document.addEventListener("surfingkeys:showStatus", function(evt) {
-        StatusBar.show(...evt.detail);
+    initSKFunctionListener("front", {
+        showPopup,
+        showBanner,
+        openFinder: () => {
+            Find.open();
+        },
+        showStatus: (contents, duration) => {
+            StatusBar.show(contents, duration);
+        },
     });
 
     self.toggleStatus = function(visible) {
@@ -560,15 +611,16 @@ const Front = (function() {
             clearPendingHint();
         }
     };
+
     function showRichHints(keyHints) {
         initL10n(function (locale) {
             var words = keyHints.accumulated;
             var cc = keyHints.candidates;
             words = Object.keys(cc).sort().map(function (w) {
-                var meta = cc[w];
-                if (meta.annotation) {
+                const annotation = localizeAnnotation(locale, cc[w].annotation);
+                if (annotation) {
                     const nextKey = w.substr(keyHints.accumulated.length);
-                    return `<div><span class=kbd-span><kbd>${htmlEncode(KeyboardUtils.decodeKeystroke(keyHints.accumulated))}<span class=candidates>${htmlEncode(KeyboardUtils.decodeKeystroke(nextKey))}</span></kbd></span><span class=annotation>${locale(meta.annotation)}</span></div>`;
+                    return `<div><span class=kbd-span><kbd>${htmlEncode(KeyboardUtils.decodeKeystroke(keyHints.accumulated))}<span class=candidates>${htmlEncode(KeyboardUtils.decodeKeystroke(nextKey))}</span></kbd></span><span class=annotation>${annotation}</span></div>`;
                 } else {
                     return "";
                 }
@@ -600,11 +652,15 @@ const Front = (function() {
 
     _actions['initFrontend'] = function(message) {
         self.topOrigin = message.origin;
+        self.topSize = message.winSize;
         return new Date().getTime();
     };
 
     window.addEventListener('message', function(event) {
-        var _message = event.data && event.data.surfingkeys_data;
+        var _message = event.data && event.data.surfingkeys_frontend_data;
+        if (_message === undefined) {
+            return;
+        }
         if (_callbacks[_message.id]) {
             var f = _callbacks[_message.id];
             // returns true to make callback stay for coming response.
@@ -614,10 +670,10 @@ const Front = (function() {
         } else if (_message.action && _actions.hasOwnProperty(_message.action)) {
             var ret = _actions[_message.action](_message);
             if (_message.ack) {
-                top.postMessage({surfingkeys_data: {
+                top.postMessage({surfingkeys_uihost_data: {
                     data: ret,
                     action: _message.action + "Ack",
-                    responseToContent: _message.commandToFrontend,
+                    toContent: true,
                 }}, self.topOrigin);
             }
         }
@@ -676,22 +732,21 @@ var StatusBar = (function() {
     var timerHide = null;
     var ui = Front.statusBar;
 
+    // 4 spans
     // mode: 0
     // search: 1
     // searchResult: 2
     // proxy: 3
-    self.show = function(n, content, duration) {
+    self.show = function(contents, duration) {
         if (timerHide) {
             clearTimeout(timerHide);
             timerHide = null;
         }
         var span = ui.querySelectorAll('span');
-        if (n < 0) {
-            span.forEach(function(s) {
-                setSanitizedContent(s, "");
-            });
-        } else {
-            setSanitizedContent(span[n], content);
+        for (var i = 0; i < contents.length; i++) {
+            if (contents[i] !== undefined) {
+                setSanitizedContent(span[i], contents[i]);
+            }
         }
         var lastSpan = -1;
         for (var i = 0; i < span.length; i++) {
@@ -713,7 +768,7 @@ var StatusBar = (function() {
         Front.flush();
         if (duration) {
             timerHide = setTimeout(function() {
-                self.show(n, "");
+                self.show(["", "", "", ""]);
             }, duration);
         }
     };
@@ -738,7 +793,7 @@ var Find = (function() {
     var historyInc;
     function reset() {
         input = null;
-        StatusBar.show(1, "");
+        StatusBar.show(["", ""]);
         self.exit();
     }
 
@@ -752,7 +807,7 @@ var Find = (function() {
      */
     self.open = function() {
         historyInc = -1;
-        StatusBar.show(1, '<input id="sk_find" class="sk_theme"/>');
+        StatusBar.show(["/", '<input id="sk_find" class="sk_theme"/>']);
         input = Front.statusBar.querySelector("input");
         if (!getBrowserName().startsWith("Safari")) {
             input.oninput = function() {
@@ -1023,13 +1078,15 @@ function createAceEditor(normal, front) {
         vim.defineEx("write", "w", function(cm, input) {
             _save();
         });
-        vim.defineEx("wq", "wq", function(cm, input) {
+        const wq = function(cm, input) {
             self.onExit = _closeAndSave;
             self.exit();
             // tell vim editor that command is done
             _ace.state.cm.signal('vim-command-done', '');
-        });
-        vim.map('<CR>', ':wq', 'normal');
+        };
+        vim.defineEx("wq", "wq", wq);
+        vim.defineEx("x", "x", wq);
+        vim.map('<CR>', ':wq<CR>', 'normal');
         vim.defineEx("bnext", "bn", function(cm, input) {
             front.contentCommand({
                 action: 'nextEdit',
@@ -1117,17 +1174,17 @@ function createAceEditor(normal, front) {
                 vim.unmap('<CR>', 'insert');
                 vim.unmap('<C-CR>', 'insert');
                 if (message.type === 'url') {
-                    vim.map('<CR>', ':wq', 'insert');
+                    vim.map('<CR>', '<Esc>:wq<CR>', 'insert');
                     _ace.setOption('showLineNumbers', false);
                     _ace.language_tools.setCompleters([createUrlCompleter()]);
                     _ace.container.style.height = "30%";
                 } else if (message.type === 'input') {
-                    vim.map('<CR>', ':wq', 'insert');
+                    vim.map('<CR>', '<Esc>:wq<CR>', 'insert');
                     _ace.setOption('showLineNumbers', false);
                     _ace.language_tools.setCompleters([pageWordCompleter]);
                     _ace.container.style.height = "16px";
                 } else {
-                    vim.map('<C-CR>', ':wq', 'insert');
+                    vim.map('<C-CR>', '<Esc>:wq<CR>', 'insert');
                     _ace.setOption('showLineNumbers', true);
                     _ace.language_tools.setCompleters([pageWordCompleter]);
                     _ace.container.style.height = "30%";

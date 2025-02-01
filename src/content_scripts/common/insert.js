@@ -6,6 +6,7 @@ import {
     createElementWithContent,
     getRealEdit,
     isEditable,
+    locateFocusNode,
     scrollIntoViewIfNeeded,
     setSanitizedContent,
 } from './utils.js';
@@ -39,9 +40,6 @@ function createInsert() {
                         document.getSelection().setPosition(node, node.childNodes.length);
                     }
                 }
-                // blink cursor to bring cursor into view
-                Visual.showCursor();
-                Visual.hideCursor();
             }
         }
     }
@@ -74,9 +72,6 @@ function createInsert() {
                 // for contenteditable div
                 var selection = document.getSelection();
                 selection.setPosition(selection.focusNode, 0);
-                // blink cursor to bring cursor into view
-                Visual.showCursor();
-                Visual.hideCursor();
             }
         }
     });
@@ -181,32 +176,29 @@ function createInsert() {
         _emojiList,
         _emojiPending = -1;
 
-    document.addEventListener("surfingkeys:userSettingsLoaded", function(evt) {
-        if (runtime.conf.enableEmojiInsertion) {
-            self.mappings.add(":", {
-                annotation: "Input emoji",
-                feature_group: 15,
-                stopPropagation: function() {
-                    return false;
-                },
-                code: function() {
-                    var element = getRealEdit();
-                    if (element.selectionStart !== undefined) {
-                        _emojiPending = element.selectionStart + 1;
-                    } else {
-                        _emojiPending = document.getSelection().focusOffset + 1;
-                    }
-                    fetch(chrome.extension.getURL("pages/emoji.tsv"))
-                        .then(res => Promise.all([res.text()]))
-                        .then(res => {
-                            _emojiList = res[0].split("\n");
-                            listEmoji();
-                        });
+    self.enableEmojiInsertion = () => {
+        self.mappings.add(":", {
+            annotation: "Input emoji",
+            feature_group: 15,
+            stopPropagation: function() {
+                return false;
+            },
+            code: function() {
+                var element = getRealEdit();
+                if (element.selectionStart !== undefined) {
+                    _emojiPending = element.selectionStart + 1;
+                } else {
+                    _emojiPending = document.getSelection().focusOffset + 1;
                 }
-            });
-        }
-    });
-
+                fetch(chrome.runtime.getURL("pages/emoji.tsv"))
+                    .then(res => Promise.all([res.text()]))
+                    .then(res => {
+                        _emojiList = res[0].split("\n");
+                        listEmoji();
+                    });
+            }
+        });
+    };
 
     function listEmoji() {
         var input = getRealEdit(), query = "", isInput = true;
@@ -236,14 +228,7 @@ function createInsert() {
                 document.body.append(_emojiDiv);
                 _emojiDiv.style.display = "";
                 _emojiDiv.querySelector('#sk_emoji>div').classList.add("selected");
-                var br;
-                if (isInput) {
-                    br = getCursorPixelPos(input);
-                } else {
-                    Visual.showCursor();
-                    br = Visual.getCursorPixelPos();
-                    Visual.hideCursor();
-                }
+                var br = isInput ? getCursorPixelPos(input) : locateFocusNode(document.getSelection());
                 var top = br.top + br.height + 4;
                 if (window.innerHeight - top < _emojiDiv.offsetHeight) {
                     top = br.top - _emojiDiv.offsetHeight;
