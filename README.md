@@ -6,7 +6,7 @@
 
 ```
 git clone https://github.com/tecfu/Surfingkeys
-chd Surfingkeys
+cd Surfingkeys
 npm install
 npm run build:prod
 ```
